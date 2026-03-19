@@ -5,6 +5,7 @@ import re
 import warnings
 from dotenv import load_dotenv
 
+from aiohttp import web # Добавили импорт для микро-сервера Render
 from aiogram import Bot, Dispatcher, types, F, html
 from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -32,7 +33,7 @@ SUPPORT_GROUP_ID = int(SUPPORT_GROUP_ID_STR)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Убрали прокси! Для Render он не нужен.
+# Инициализация бота без прокси
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 
@@ -233,7 +234,7 @@ async def take_order_handler(callback: CallbackQuery):
 async def already_taken_handler(callback: CallbackQuery):
     await callback.answer("Эту заявку уже забрал другой сотрудник!", show_alert=True)
 
-# Хэндлер для ответа клиенту из ЛЮБОЙ админской группы (заказы или поддержка)
+# Хэндлер для ответа клиенту из ЛЮБОЙ админской группы
 @dp.message(F.chat.id.in_({ADMIN_GROUP_ID, SUPPORT_GROUP_ID}), F.reply_to_message)
 async def admin_reply_to_user(message: types.Message):
     original_text = message.reply_to_message.text or message.reply_to_message.caption
@@ -244,7 +245,7 @@ async def admin_reply_to_user(message: types.Message):
     if match:
         user_id = int(match.group(1))
 
-        # Определяем, откуда ответ: от менеджера по заказам или от поддержки
+        # Определяем, откуда ответ
         sender_role = "Менеджера" if message.chat.id == ADMIN_GROUP_ID else "Службы поддержки"
 
         try:
@@ -256,13 +257,35 @@ async def admin_reply_to_user(message: types.Message):
         except Exception as e:
             logging.error(f"Не удалось отправить ответ клиенту {user_id}: {e}")
             await message.reply("❌ Не получилось отправить. Возможно, клиент заблокировал бота.")
+
+
+# --- ФИКТИВНЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ---
+async def handle_ping(request):
+    return web.Response(text="Bot is running and port is bound!")
+
+async def start_dummy_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Render сам передает нужный порт через переменную окружения PORT
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logging.info(f"Фиктивный веб-сервер запущен на порту {port}")
+
 # --- ЗАПУСК ---
 async def main():
-    logging.info("--- Бот Bluora запущен на Render (Заказы + Поддержка + Видео) ---")
+    logging.info("--- Бот Bluora запущен на Render (Free Tier) ---")
     
-    # Удаляем старый вебхук, чтобы избежать конфликта TelegramConflictError
+    # 1. Запускаем веб-заглушку, чтобы закрыть требование открытого порта от Render
+    await start_dummy_server()
+
+    # 2. Удаляем старый вебхук на случай, если он висит в Telegram
     await bot.delete_webhook(drop_pending_updates=True)
     
+    # 3. Запускаем long-polling бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
