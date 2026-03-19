@@ -256,10 +256,13 @@ async def admin_reply_to_user(message: types.Message):
         except Exception as e:
             logging.error(f"Не удалось отправить ответ клиенту {user_id}: {e}")
             await message.reply("❌ Не получилось отправить. Возможно, клиент заблокировал бота.")
-
 # --- ЗАПУСК ---
 async def main():
     logging.info("--- Бот Bluora запущен на Render (Заказы + Поддержка + Видео) ---")
+    
+    # Удаляем старый вебхук, чтобы избежать конфликта TelegramConflictError
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
